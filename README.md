@@ -94,7 +94,7 @@ https://pytorch.org/get-started/locally/
 Clone the repository:
 
 ```bash
-git clone https://github.com/mahandhgh/imdb-sentiment-analysis.git
+git clone https://github.com/mahandhgh/IMDB-Sentiment-Analysis-LSTM.git
 cd imdb-sentiment-analysis
 ```
 
