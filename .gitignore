@@ -22,3 +22,5 @@ aclImdb/
 *.log
 checkpoints/
 runs/
+
+sentiment_model.pth
