@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 from tqdm import tqdm
-from model.preprocessing import create_imdb_dataloaders
-from model.model import SentimentRNN
+from models.preprocessing import create_imdb_dataloaders
+from models.model import SentimentRNN
 
 class Trainer:
     def __init__(self, model, train_loader, val_loader, device, learning_rate=1e-3):

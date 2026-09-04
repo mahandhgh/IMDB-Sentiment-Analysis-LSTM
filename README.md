@@ -1,28 +1,29 @@
 # IMDb Sentiment Analysis with LSTM
 
-A PyTorch-based Natural Language Processing project for binary sentiment classification on the IMDb movie review dataset. The project builds a vocabulary from the training reviews, converts text into indexed sequences, pads batches dynamically, and uses an LSTM-based recurrent neural network to classify reviews as **positive** or **negative**.
+A PyTorch-based Natural Language Processing project for binary sentiment classification on the IMDb movie review dataset. The project builds a vocabulary from the training reviews, converts text into indexed sequences, dynamically pads batches, trains an LSTM-based recurrent neural network, and provides a separate inference pipeline for classifying new movie reviews as **positive** or **negative**.
 
 ## Overview
 
-The main goal of this project is to implement a complete sentiment-analysis pipeline without relying on a high-level text-classification framework.
+The project implements an end-to-end sentiment-analysis pipeline using PyTorch without relying on a high-level text-classification framework.
 
 The pipeline includes:
 
 - Text tokenization and basic normalization
 - Vocabulary construction from the training set
-- Handling unknown words with an `<unk>` token
-- Padding variable-length sequences with a `<pad>` token
+- Handling unknown words with `<unk>`
+- Padding variable-length sequences with `<pad>`
 - Word embeddings using PyTorch's `Embedding` layer
 - Sequence modeling with LSTM
 - Binary classification with a linear output layer
 - Training with cross-entropy loss and the Adam optimizer
 - Gradient clipping for training stability
 - GPU acceleration when CUDA is available
-- Saving the trained model weights to `sentiment_model.pth`
+- Saving the trained model together with the training vocabulary and model configuration
+- A separate prediction interface for classifying new reviews
 
 ## Model Architecture
 
-The default configuration in `main.py` is:
+The default training configuration is:
 
 | Component | Configuration |
 |---|---|
@@ -61,20 +62,32 @@ aclImdb/
     └── neg/
 ```
 
-> **Important:** The dataset is intentionally not included in this GitHub repository. It is large and can be downloaded separately from the official source above.
+> **Important:** The dataset is intentionally not included in this GitHub repository. Download and extract it separately from the official source above.
 
 ## Project Structure
 
 ```text
 imdb-sentiment-analysis/
-├── data.py                  # Dataset loading, tokenization, vocabulary, batching
-├── model.py                 # LSTM/RNN sentiment classifier
-├── trainer.py               # Training and evaluation loop
-├── main.py                  # Project entry point
-├── sentiment_model.pth      # Trained model weights
-├── requirements.txt         # Python dependencies
-├── .gitignore               # Files excluded from Git
-└── README.md                # Project documentation
+├── models/
+│   ├── __init__.py
+│   ├── model.py                 # LSTM/RNN sentiment classifier
+│   └── preprocessing.py         # Tokenization, vocabulary, dataset, batching
+│
+├── train/
+│   ├── __init__.py
+│   ├── trainer.py               # Training and evaluation loop
+│   └── main_trainer.py          # Training entry point
+│
+├── predicts/
+│   ├── __init__.py
+│   ├── predict.py               # Prediction logic
+│   └── main_predict.py          # Interactive prediction interface
+│
+├── aclImdb/                     # Local dataset directory
+├── sentiment_model.pth          # Trained checkpoint 
+├── requirements.txt             # Python dependencies
+├── .gitignore                   # Files excluded from Git
+└── README.md                    # Project documentation
 ```
 
 ## Requirements
@@ -83,7 +96,6 @@ imdb-sentiment-analysis/
 - PyTorch
 - pandas
 - tqdm
-
 
 For GPU training, install the appropriate PyTorch build for your CUDA version from the official PyTorch website:
 
@@ -95,7 +107,7 @@ Clone the repository:
 
 ```bash
 git clone https://github.com/mahandhgh/IMDB-Sentiment-Analysis-LSTM.git
-cd imdb-sentiment-analysis
+cd IMDB-Sentiment-Analysis-LSTM
 ```
 
 Install dependencies:
@@ -104,95 +116,139 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Download and extract the IMDb dataset, then place the `aclImdb` directory so that it is available next to `main.py`.
-
-For example:
+Download and extract the IMDb dataset. The `aclImdb` directory should be located in the project root:
 
 ```text
 imdb-sentiment-analysis/
 ├── aclImdb/
 │   ├── train/
 │   └── test/
-├── data.py
-├── model.py
-├── trainer.py
-└── main.py
+├── models/
+├── train/
+└── predicts/
 ```
 
 ## Training
 
-Run:
+From the project root, run:
 
 ```bash
-python main.py
+python -m train.main_trainer
 ```
 
-During training, the program reports the loss and accuracy for each epoch. At the end, the best validation accuracy is displayed and the trained weights are saved as:
+The training pipeline:
+
+1. Loads the IMDb training and test reviews.
+2. Builds the vocabulary **only from the training reviews**.
+3. Converts reviews to indexed sequences.
+4. Dynamically pads each batch.
+5. Trains the LSTM classifier.
+6. Evaluates the model during training.
+7. Saves the trained checkpoint as `sentiment_model.pth`.
+
+### Model Checkpoint
+
+The final `sentiment_model.pth` is saved as a checkpoint containing:
 
 ```text
-sentiment_model.pth
+model_state_dict
+word2idx
+model_config
+```
+
+This means the exact vocabulary mapping used during training is stored inside the checkpoint itself.
+
+**No separate `vocab.json` file is required.**
+
+Because the vocabulary is stored with the model, the prediction pipeline does not need to rebuild the vocabulary from the IMDb dataset.
+
+## Prediction
+
+After training, place the generated `sentiment_model.pth` in the project root:
+
+```text
+imdb-sentiment-analysis/
+├── sentiment_model.pth
+├── models/
+├── train/
+└── predicts/
+```
+
+The prediction pipeline does **not** require the `aclImdb` dataset.
+
+Run the interactive predictor from the project root:
+
+```bash
+python predicts/main_predict.py
 ```
 
 ## How the Code Works
 
 ### 1. Data preprocessing
 
-`data.py` reads the positive and negative reviews from the IMDb folder structure. Reviews are converted to lowercase and tokenized using a simple regular-expression-based tokenizer.
+`models/preprocessing.py` reads positive and negative reviews from the IMDb folder structure. Reviews are converted to lowercase and tokenized using a simple regular-expression-based tokenizer.
 
 ### 2. Vocabulary
 
-The vocabulary is created only from the training reviews. Words that appear fewer than `min_freq=2` times are excluded, while unseen words are mapped to `<unk>`.
+The vocabulary is created from the training reviews with `min_freq=2`.
+
+Two special tokens are always included:
+
+```text
+<pad> -> 0
+<unk> -> 1
+```
+
+Words that appear fewer than two times are excluded, while unseen words are mapped to `<unk>`.
 
 ### 3. Batch preparation
 
-Reviews have different lengths, so each batch is padded to the length of its longest sequence. The original sequence lengths are also returned so that `pack_padded_sequence` can ignore padding during recurrent processing.
+Reviews have different lengths, so each batch is padded to the length of its longest sequence. The original sequence lengths are also returned so that packed sequences can ignore padding during recurrent processing.
 
 ### 4. LSTM model
 
-`model.py` first maps token IDs to dense word embeddings. The embedded sequences are packed and processed by the LSTM. The final hidden state is passed through dropout and a linear classifier to produce two logits: negative and positive.
+`models/model.py` maps token IDs to dense word embeddings. The embedded sequences are packed and processed by the recurrent layer. The final hidden representation is passed through dropout and a linear classifier to produce two logits:
+
+```text
+0 -> Negative
+1 -> Positive
+```
 
 ### 5. Training
 
-`trainer.py` uses:
+`train/trainer.py` uses:
 
 - Cross-entropy loss
 - Adam optimization
 - Gradient clipping with a maximum norm of `1.0`
 - Accuracy as the main evaluation metric
 
+### 6. Prediction
+
+`predicts/predict.py` loads:
+
+- The trained model weights
+- The exact `word2idx` mapping used during training
+- The stored model configuration
+
+The input review is processed with the same tokenizer used during training, converted to the stored word indices, and passed to the LSTM. The predictor returns the predicted sentiment, confidence, and probabilities for both classes.
+
+`predicts/main_predict.py` provides a simple interactive command-line interface.
+
 ## Current Experimental Setup
 
-In the current implementation, `main.py` passes the IMDb **test split** to the trainer as `val_loader`. Therefore, the reported `Val Accuracy` corresponds to performance on the test split rather than on a separate validation split.
+In the current implementation, the IMDb **test split** is passed to the trainer as `val_loader`. Therefore, the reported `Val Accuracy` corresponds to performance on the test split rather than on a separate validation split.
 
 For a stricter machine-learning evaluation, a validation subset should be created from the training data and the test set should remain untouched until the final evaluation.
-
-## Trained Model
-
-The repository can include the trained weights:
-
-```text
-sentiment_model.pth
-```
-
-The file contains the model's `state_dict`, not a complete serialized model object. To load it later, recreate the same `SentimentRNN` architecture and then call:
-
-```python
-model.load_state_dict(torch.load("sentiment_model.pth", map_location=device))
-model.eval()
-```
-
-Because the model architecture depends on the vocabulary, the same vocabulary-building process must be used when reconstructing the model.
 
 ## Limitations and Possible Improvements
 
 The current project uses a lightweight preprocessing pipeline and a relatively simple recurrent architecture. Possible improvements include:
 
 - Creating a dedicated validation split from the training data
-- Saving the vocabulary alongside the model
-- Adding an inference script for predicting new reviews
-- Using pretrained word embeddings or a transformer-based model
 - Tracking precision, recall, and F1-score in addition to accuracy
 - Adding reproducibility settings such as fixed random seeds
-- Saving the best model checkpoint instead of only the final epoch weights
-
-
+- Saving the best checkpoint instead of only the final trained checkpoint
+- Using pretrained word embeddings
+- Replacing the LSTM with a transformer-based model
+- Adding a graphical or web-based interface for inference
